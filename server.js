@@ -6,8 +6,8 @@ const cors = require('cors');
 
 const app = express();
 app.use(cors());
-app.use(bodyParser.json({ limit: '10mb' })); // Increase limit for JSON payloads
-app.use(bodyParser.urlencoded({ limit: '10mb', extended: true })); // Increase limit for URL-encoded payloads
+app.use(bodyParser.json({ limit: '10mb' })); // Increased limit for JSON payloads
+app.use(bodyParser.urlencoded({ limit: '10mb', extended: true })); // Increased limit for URL-encoded payloads
 
 // MongoDB connection
 const dbURI = 'mongodb+srv://readwrite:feinfeinfein@beyond.26wl0.mongodb.net/BeyondDB';
@@ -43,6 +43,18 @@ const experienceSchema = new mongoose.Schema({
 });
 
 const Experience = mongoose.model('Experience', experienceSchema);
+
+// Booking Schema
+const bookingSchema = new mongoose.Schema({
+  userId: { type: String, required: true },
+  expId: { type: String, required: true },
+  totalPeople: { type: Number, required: true },
+  totalPrice: { type: Number, required: true },
+  date: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now },
+});
+
+const Booking = mongoose.model('Booking', bookingSchema);
 
 // Register User
 app.post('/register', async (req, res) => {
@@ -104,7 +116,7 @@ app.post('/upload-experience', async (req, res) => {
     description,
     location,
     maxPeople,
-    gmapsLink,  // Capture Google Maps link
+    gmapsLink,
     images = []
   } = req.body;
 
@@ -132,7 +144,7 @@ app.post('/upload-experience', async (req, res) => {
       description,
       location,
       maxPeople,
-      gmapsLink,  // Store Google Maps link in the experience
+      gmapsLink,
       images: base64Images,
       expId,
     });
@@ -166,17 +178,16 @@ app.post('/search', async (req, res) => {
     const experiences = await Experience.find({
       $or: [
         { name: { $regex: query, $options: 'i' } },
-        { description: { $regex: query, $options: 'i' } },
+        { description: { $regex: query, $options: 'i' } }
       ],
     });
-
     const response = experiences.map(exp => ({
       _id: exp._id,
       name: exp.name,
       description: exp.description,
       images: exp.images,
       location: exp.location,
-      gmapsLink: exp.gmapsLink, // Include Google Maps link
+      gmapsLink: exp.gmapsLink,
       maxPeople: exp.maxPeople,
       price: exp.price,
       rating: exp.rating,
@@ -198,7 +209,7 @@ app.get('/experience/:id', async (req, res) => {
     if (!experience) {
       return res.status(404).json({ message: 'Experience not found' });
     }
-    
+
     res.json({
       _id: experience._id,
       name: experience.name,
@@ -216,6 +227,143 @@ app.get('/experience/:id', async (req, res) => {
   }
 });
 
+// Book Experience
+app.post('/book-experience', async (req, res) => {
+  const { userId, expId, totalPeople, totalPrice, date } = req.body;
+
+  try {
+    // Validate input
+    if (!userId || !expId || !totalPeople || !totalPrice || !date) {
+      return res.status(400).json({ message: 'All fields are required' });
+    }
+
+    // Create a new booking
+    const newBooking = new Booking({
+      userId,
+      expId,
+      totalPeople,
+      totalPrice,
+      date,
+    });
+
+    await newBooking.save();
+    res.status(201).json({ message: 'Booking successful', bookingId: newBooking._id });
+  } catch (error) {
+    console.error("Error booking experience:", error);
+    res.status(500).json({ message: 'Error booking experience', error: error.message });
+  }
+});
+
+// Fetch Upcoming Bookings
+app.get('/bookings/upcoming', async (req, res) => {
+  const userId = req.query.userId;
+
+  try {
+    const upcomingBookings = await Booking.find({
+      userId: userId,
+      date: { $gte: new Date() } // Assuming date is stored in ISO format
+    }).select('name date status image'); // Select only necessary fields
+
+    res.json(upcomingBookings);
+  } catch (error) {
+    res.status(500).json({ message: 'Error fetching bookings', error: error.message });
+  }
+});
+// Fetch User Details by User ID
+app.get('/user/:userId', async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    const user = await User.findOne({ userId });
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Return user details except for the password
+    res.json({
+      name: user.name,
+      email: user.email,
+      phone: user.phone || 'N/A', // Replace with actual user phone field if it exists
+      userId: user.userId,
+    });
+  } catch (error) {
+    console.error("Error fetching user details:", error);
+    res.status(500).json({ message: 'Error fetching user details' });
+  }
+});
+
+
+// Delete User by User ID
+app.delete('/delete-user/:userId', async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    const result = await User.findOneAndDelete({ userId });
+    if (!result) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    res.status(200).json({ message: 'User deleted successfully' });
+  } catch (error) {
+    console.error("Error deleting user:", error);
+    res.status(500).json({ message: 'Error deleting user' });
+  }
+});
+
+// Delete Experience by Experience ID
+app.delete('/delete-experience/:expId', async (req, res) => {
+  const { expId } = req.params;
+
+  try {
+    const result = await Experience.findOneAndDelete({ expId });
+    if (!result) {
+      return res.status(404).json({ message: 'Experience not found' });
+    }
+    res.status(200).json({ message: 'Experience deleted successfully' });
+  } catch (error) {
+    console.error("Error deleting experience:", error);
+    res.status(500).json({ message: 'Error deleting experience' });
+  }
+});
+// Delete Experience by ID
+app.delete('/delete-experience/:expId', async (req, res) => {
+  const { expId } = req.params;
+
+  try {
+    const deletedExperience = await Experience.findOneAndDelete({ expId });
+    if (!deletedExperience) {
+      return res.status(404).json({ message: 'Experience not found' });
+    }
+
+    res.json({ message: 'Experience deleted successfully' });
+  } catch (error) {
+    console.error("Error deleting experience:", error);
+    res.status(500).json({ message: 'Error deleting experience' });
+  }
+});
+
+// Fetch All Experiences (used in ListingsPage)
+app.get('/experiences', async (req, res) => {
+  try {
+    const experiences = await Experience.find({});
+    res.json(experiences);
+  } catch (error) {
+    console.error("Error fetching experiences:", error);
+    res.status(500).json({ message: 'Error fetching experiences' });
+  }
+});
+// Fetch all Users
+app.get('/users', async (req, res) => {
+  try {
+    const users = await User.find({}, { password: 0 }); // Exclude password from response
+    res.json(users);
+  } catch (error) {
+    console.error("Error fetching users:", error);
+    res.status(500).json({ message: 'Error fetching users' });
+  }
+});
+
 // Start the server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, '0.0.0.0', () => console.log(`Server running on http://0.0.0.0:${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
